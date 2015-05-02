@@ -155,6 +155,8 @@ commands = {
 }
 
 def loop(ser):
+    print
+    print
     c = ser.read()
     cmd = commands.get(c, None)
 
