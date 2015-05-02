@@ -1,0 +1,6 @@
+[submodule "externals/uno2iec"]
+	path = externals/uno2iec
+	url = git@github.com:biappi/uno2iec.git
+[submodule "externals/ino"]
+	path = externals/ino
+	url = git@github.com:biappi/ino.git
