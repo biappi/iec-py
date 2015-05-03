@@ -107,13 +107,16 @@ def read_command_with_size(ser):
 
     ser.write(prefix + length + data)
 
+logs = open('rece.txt', 'a')
+logs.write('\nNEW\n\n')
+
 def write_command(ser):
     length = ser.read()
     data   = ser.read(ord(length) - 2)
 
-    print 'WRITE', print_data(data)
-    print 'WRITE', data
-    print '-'
+    print 'WRITE', data[:-1]
+    logs.write(data[:-1])
+    logs.write('\n')
 
 
 
