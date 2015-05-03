@@ -3,6 +3,7 @@ glob2==0.4.1
 -e git+git@github.com:biappi/ino.git@f3dd60da712febfcb399b0512346cc7235ceabbb#egg=ino-master
 Jinja2==2.7.3
 MarkupSafe==0.23
+Ophis==1.0
 ordereddict==1.1
 pyserial==2.7
 six==1.9.0
