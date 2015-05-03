@@ -1,3 +1,4 @@
+import os
 import serial
 import functools
 
@@ -17,8 +18,14 @@ facilities = {
 }
 
 ignored_facilities = (
-    'SER <',
-    'SER >',
+    #'SER <',
+    #'SER >',
+
+    #'COMMAND',
+
+    'COM IN',
+    'COM OUT',
+    'MAIN',
 )
 
 class Logger:
@@ -87,6 +94,22 @@ class Serial(serial.Serial):
         log.log('OUT', repr(self.todump_out))
         self.todump_out = ''
 
+
+##########################
+
+current_filename = None
+current_file = None
+
+data = None
+remainingData = None
+
+def refresh_listing():
+    dirlist = ['DIRECTORY LISTING', ''] + os.listdir('prg')
+    dirlist = encode_lines(dirlist)
+    dirlist = list(dirlist)
+
+    return '\x01\x08' + ''.join(chr(i) for i in dirlist)
+
 def register_facility_string(ser):
     line = ser.readline()
     ser.dump_in()
@@ -102,14 +125,19 @@ def debug_output(ser):
     log.log(facil, mesg)
 
 def request_file_size(ser):
+    # used on the ardino side only for progess bar
     ser.dump_in()
-    filesize = 0
-    hi = chr((filesize >> 8) | 0xff)
-    lo = chr((filesize >> 0) | 0xff)
-    ser.write('S' + hi + lo)
+    filesize = 0 #  len(files[current_filename])
+    hi = chr((filesize >> 8) & 0xff)
+    lo = chr((filesize >> 0) & 0xff)
+    ser.write('S' + lo + hi)
     ser.dump_out()
 
 def open_command(ser):
+    NOTHING = 0
+    FILE    = 2
+    DIR     = 3
+
     length  = ord(ser.read())
     rest    = ser.read(length - 2)
 
@@ -120,39 +148,75 @@ def open_command(ser):
 
     log.log('C', "Open channel: %d name: %s" % (channel, name))
 
-    # OK (write file)
-    result  = chr(0)
-    ser.write('>' + result + '\r')
-    ser.dump_out()
-    return
+    global current_file
+    global current_filename
 
-    # directory listing
-    result  = chr(3)
+    global data
+    global remaining_data
+
+    current_filename = name
+
+    if channel == 0:
+        # Basic LOAD commands go to 0
+
+        if name == '$':
+            data = refresh_listing()
+            remaining_data = data
+            result = FILE
+        else:
+            try:
+                current_file = open(os.path.join('prg', name), 'r')
+                data = current_file.read()
+                remaining_data = data
+                result = FILE
+            except Exception as e:
+                print e
+                result = NOTHING
+
+    elif channel == 1:
+        # Basic SAVE commands go to 1
+        try:
+            current_file = open(os.path.join('prg', name), 'w')
+            result = NOTHING
+        except Exception as e:
+            print e
+            result = NOTHING # ??
+
+    result  = chr(result)
     ser.write('>' + result + '\r')
     ser.dump_out()
-    return
+
+
+def do_the_read(ser):
+    global data
+    global remaining_data
+
+    to_send, remaining_data = remaining_data[:0xff], remaining_data[0xff:]
+
+    print len(to_send), len(remaining_data)
+
+    eof    = not bool(remaining_data)
+    length = chr(len(to_send))
+    prefix = 'E' if eof else 'B'
+
+    ser.write(prefix + length + to_send)
+    ser.dump_out()
+
 
 def read_command(ser):
     ser.dump_in()
 
-    data   = '\0\0\0\0'
-    eof    = True
-    length = chr(len(data))
-    prefix = 'E' if eof else 'B'
+    log.log('C', "Read command")
+    do_the_read(ser)
 
-    ser.write(prefix + length + data)
-    ser.dump_out()
 
 def read_command_with_size(ser):
-    wanted = ser.read()
+    wanted = ord(ser.read())
     ser.dump_in()
 
-    data   = '\0\0\0\0'
-    eof    = True
-    length = chr(len(data))
-    prefix = 'E' if eof else 'B'
+    log.log('C', "Read command, requested: %d" % wanted)
+    do_the_read(ser)
 
-    ser.write(prefix + length + data)
 
 logs = open('rece.txt', 'a')
 logs.write('\nNEW\n\n')
@@ -163,6 +227,8 @@ def write_command(ser):
     ser.dump_in()
 
     log.log('C', 'WROTE DATA: %r' % data) 
+
+    current_file.write(data)
 
     logs.write(data[:-1])
     logs.write('\n')
@@ -182,6 +248,7 @@ def directory_info_request(ser):
         to_send += listing[0]
         to_send = 'L%s%s' % (chr(len(to_send)), to_send)
         ser.write(to_send)
+        ser.dump_out()
         listing = listing[1:]
         i += 1
     else:
@@ -190,6 +257,12 @@ def directory_info_request(ser):
 
 def close_command(ser):
     ser.dump_in()
+
+    global current_file
+    if current_file is not None:
+        current_file.close()
+        current_file = None
+
     deviceno = chr(8)
     ser.write('C' + deviceno)
     ser.dump_out()
@@ -232,6 +305,34 @@ def main():
     while True:
         loop(log)
 
+def int16_to_int8(number):
+    return (number & 0xff00) >> 8, number & 0x00ff 
+
+def encode_lines(lines):
+    current = 0x0401 # apparently it's the start of VIC-20
+                     # BASIC ram, which will be however
+                     # rebased by the C64 BASICv2
+
+    for i, line in enumerate(lines):
+        next_line = current + len(line) + 2 + 2 + 1 # 2 = space for next ptr
+                                                    # 2 = space for line number
+                                                    # 1 = space for end-of-line
+
+        line_no_hi,   line_no_lo   = int16_to_int8((i + 1) * 10)
+        next_line_hi, next_line_lo = int16_to_int8(next_line)
+
+        current = next_line
+
+        yield next_line_lo
+        yield next_line_hi
+
+        yield line_no_lo
+        yield line_no_hi
+
+        for char in line:
+            yield ord(char)
+
+        yield 0x00
 
 if __name__ == '__main__':
     main() 
