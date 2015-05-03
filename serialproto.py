@@ -5,6 +5,7 @@ def print_data(s):
 
 class Serial(serial.Serial):
     def __init__(self):
+        self.l = False
         serial.Serial.__init__(
             self,
             '/dev/cu.usbmodem1a1241',
@@ -12,17 +13,17 @@ class Serial(serial.Serial):
         )
 
     def write(self, s):
-        print 'SER >   -', print_data(s)
+        if self.l: print 'SER >   -', print_data(s)
         serial.Serial.write(self, s)
 
     def read(self, howmuch=None):
         if howmuch is None:
             c = serial.Serial.read(self)
-            print 'SER <   -', c, ord(c), hex(ord(c))
+            if self.l: print 'SER <   -', c, ord(c), hex(ord(c))
             return c
         else:
             x = serial.Serial.read(self, howmuch)
-            print 'SER <   -', x
+            if self.l: print 'SER <   -', x
             return x
 
     def readline(self):
@@ -31,7 +32,7 @@ class Serial(serial.Serial):
         while not incoming.endswith('\r'):
             incoming += serial.Serial.read(self)
 
-        print 'SER <   -', incoming
+        if self.l: print 'SER <   -', incoming
         return incoming
 
 okstring = "OK>8|11|10|9|8|2:2015-14-28.23.10.10\r"
@@ -155,13 +156,11 @@ commands = {
 }
 
 def loop(ser):
-    print
-    print
     c = ser.read()
     cmd = commands.get(c, None)
 
     if not cmd is None:
-        print 'calling', cmd.__name__
+        #print 'calling', cmd.__name__
         cmd(ser)
     else:
         c += ser.readline()
